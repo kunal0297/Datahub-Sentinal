@@ -1,0 +1,40 @@
+# WIP — see ../DESIGN.md. Example SentinelDeployment resource matching the
+# design doc's spec. Nothing reconciles this yet; it exists so a reader can
+# `kubectl apply --dry-run=client` the shape and see what a real rollout
+# would declare.
+apiVersion: sentinel.datahub.io/v1alpha1
+kind: SentinelDeployment
+metadata:
+  name: commerce-sentinel
+  namespace: data-platform
+spec:
+  datahub:
+    gmsUrl: http://datahub-gms.datahub.svc:8080
+    tokenSecretRef:
+      name: datahub-credentials
+      key: token
+  agents:
+    qualityChecker:
+      enabled: true
+      schedule: "*/30 * * * *"
+      checksConfigMapRef:
+        name: sentinel-quality-checks
+        key: quality_checks.yml
+      mode: ingestion
+    mlBlastRadius:
+      enabled: true
+      schedule: "0 * * * *"
+      urns:
+        - "urn:li:mlModel:(urn:li:dataPlatform:sagemaker,fraud_detection_v3,PROD)"
+      hopLimit: 6
+    enrichment:
+      enabled: false
+  notifications:
+    slack:
+      webhookSecretRef:
+        name: slack-credentials
+        key: webhook-url
+      channel: "#data-incidents"
+  severityRulesConfigMapRef:
+    name: sentinel-severity-rules
+    key: severity_rules.yml
