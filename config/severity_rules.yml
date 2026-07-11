@@ -1,0 +1,37 @@
+# Data-driven severity rules for the Incident Automation Engine
+# (core/incident_engine.py). Rules are evaluated in order; the first match
+# wins. `default` applies when no rule matches.
+#
+# Each rule's `when` clause is checked against a SeverityContext (a small,
+# fixed set of facts — see `SeverityContext` in incident_engine.py) using a
+# whitelisted operator (`equals` or `at_least`). This is deliberately not a
+# generic expression language: a rules file should never become an eval()
+# vector, and the spec's stated inputs (production tag, downstream reach,
+# whether it feeds a production ML model) all fit this shape.
+rules:
+  - when:
+      field: has_production_critical_tag
+      equals: true
+    severity: CRITICAL
+
+  - when:
+      field: feeds_production_ml_model
+      equals: true
+    severity: CRITICAL
+
+  - when:
+      field: downstream_dashboard_count
+      at_least: 1
+    severity: HIGH
+
+  - when:
+      field: downstream_dataset_count
+      at_least: 5
+    severity: HIGH
+
+  - when:
+      field: downstream_dataset_count
+      at_least: 1
+    severity: MEDIUM
+
+default: LOW

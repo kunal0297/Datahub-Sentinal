@@ -171,6 +171,10 @@ class Incident(BaseModel):
     dedup_key: str
     source_agent: str
     link: str | None = None
+    # Resolved by the caller (via `incident_engine.resolve_owner`, which needs
+    # Asset + domain-ownership context the engine itself doesn't fetch) and
+    # passed in so notifiers can address the right person.
+    owner: Owner | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     resolved_at: datetime | None = None
     resolution_comment: str | None = None

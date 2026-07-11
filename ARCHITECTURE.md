@@ -122,6 +122,17 @@ assume. Findings as of this writing (2026-07), sources linked inline:
   bulk metadata emission, which is a distinct concern from agent-driven
   read/write and doesn't belong behind the MCP tool surface.
 
+## Status notes
+
+- **Live DataHub smoke test: deferred.** `seed/seed_datahub.py` is verified by
+  constructing and serializing (`MetadataChangeProposalWrapper.make_mcp()`) all
+  50 seeded aspects against the actually-installed `acryl-datahub` package — this
+  catches signature/field-name mistakes, but hasn't yet been run against a live
+  `datahub docker quickstart` instance, because the dev machine had ~145MB free
+  RAM and 86% swap utilization at the time (the quickstart's 14-container stack
+  recommends 8GB free). Run `make demo` once there's headroom to complete this
+  check — see the Makefile's `datahub-up`/`seed` targets.
+
 ## Repository layout
 
 See the file tree in the project's build spec (kept out of this file to avoid two
