@@ -223,7 +223,10 @@ class ColumnChangeType(StrEnum):
 
 class SchemaField(BaseModel):
     name: str
-    type: str
+    # Optional because file-parsed "after" schemas (raw SQL SELECT lists have
+    # no type declarations) often can't know this — schema_diff.py only
+    # classifies type_changed when both sides have a type.
+    type: str | None = None
     description: str | None = None
     nullable: bool = True
 
