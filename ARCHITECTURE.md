@@ -105,7 +105,28 @@ assume. Findings as of this writing (2026-07), sources linked inline:
 - **Assertions**: current (non-deprecated) types are `FIELD`, `VOLUME`,
   `FRESHNESS`, `DATA_SCHEMA`, `SQL`. The Quality Checker (Tier 2) creates these
   natively via the SDK rather than depending on DataHub Cloud's managed
-  Smart Assertions / Observe.
+  Smart Assertions / Observe. Constructor signatures for every assertion
+  aspect it emits (`AssertionInfoClass`, `FieldAssertionInfoClass` +
+  `FieldMetricAssertionClass` (NULL_PERCENTAGE), `VolumeAssertionInfoClass` +
+  `RowCountTotalClass`, `SqlAssertionInfoClass`, `AssertionRunEventClass`)
+  were verified by introspecting the installed `acryl-datahub` package.
+- **Reading assertion run results (GraphQL)**: query shape verified against the
+  [Assertions API tutorial](https://docs.datahub.com/docs/api/tutorials/assertions):
+  `dataset(urn){ assertions(start, count){ assertions { urn info{type description}
+  runEvents(status: COMPLETE, limit: 1){ runEvents { result { type nativeResults
+  { key value } } } } } } }` — used by `DataHubClient.get_assertions_with_latest_run`
+  (the ML Blast Radius health signal).
+- **Reading dataset profiles**: rather than an unverified GraphQL
+  `datasetProfiles` query, `DataHubClient.get_latest_profile` uses the SDK's
+  `DataHubGraph.get_latest_timeseries_value(entity_urn, DatasetProfileClass,
+  filter_criteria_map)` — signature verified by introspection of the installed
+  package. This is the Quality Checker's ingestion-driven read path.
+- **Connector hook deviation from the spec**: the spec sketched
+  `ConnectorPlugin.extract()` yielding `sentinel.core.models.MetadataChangeProposal`.
+  That model is Sentinel's *human-gated metadata edit proposal* (a different
+  concept that happens to share DataHub's MCP name); bulk ingestion through a
+  human-approval queue would be wrong. `extract()` therefore yields the SDK's
+  `MetadataChangeProposalWrapper` — see `integrations/connectors/base.py`.
 
 ## MCP client design
 
@@ -124,24 +145,29 @@ assume. Findings as of this writing (2026-07), sources linked inline:
 
 ## Status notes
 
-- **Live DataHub smoke test: deferred.** `seed/seed_datahub.py` is verified by
-  constructing and serializing (`MetadataChangeProposalWrapper.make_mcp()`) all
-  50 seeded aspects against the actually-installed `acryl-datahub` package — this
-  catches signature/field-name mistakes, but hasn't yet been run against a live
-  `datahub docker quickstart` instance, because the dev machine had ~145MB free
-  RAM and 86% swap utilization at the time (the quickstart's 14-container stack
-  recommends 8GB free). Run `make demo` once there's headroom to complete this
-  check — see the Makefile's `datahub-up`/`seed` targets. The same constraint
-  means PR Impact Analysis and the Migration Copilot are verified against
-  `FakeDataHubClient` (112 unit tests) but not yet end-to-end against a live
-  GMS — re-run `sentinel pr-impact` / `sentinel migrate` once `make demo` has
-  completed to close that gap.
-- **Live LLM call: deferred.** No `ANTHROPIC_API_KEY` is configured in this
-  environment, so `codegen.generate_rewrite` (Migration Copilot) has only been
-  verified at the prompt-construction level (`build_codegen_prompt`, fully unit
-  tested) — the actual API call is thin, untested-beyond-that wrapper code, per
-  the spec's own Definition of Done for this module. Set `ANTHROPIC_API_KEY`
-  and re-run `sentinel migrate` to exercise it live.
+- **Live DataHub smoke test: deferred, and now automated.** `seed/seed_datahub.py`
+  is verified by constructing and serializing
+  (`MetadataChangeProposalWrapper.make_mcp()`) all 53 seeded aspects (both the
+  default and `--heal` passes) against the actually-installed `acryl-datahub`
+  package — this catches signature/field-name mistakes, but the dev
+  environments used so far lacked the ~8GB free RAM DataHub's 14-container
+  quickstart stack needs, so no live-GMS run has happened yet. The gap is now
+  closed structurally rather than manually: `tests/integration/test_end_to_end.py`
+  runs the full seeded scenario (PR Impact incident, Migration Copilot lineage
+  walk + deprecation, ML Blast Radius trace, Quality fail→heal→auto-resolve)
+  against a real quickstart instance, and `.github/workflows/demo-self-check.yml`
+  executes it in CI on default-branch pushes/weekly/on-demand. Until that
+  workflow's first green run, treat all live-GMS behavior (including the exact
+  `get_lineage`/`get_entities` MCP payload shapes documented in
+  core/blast_radius.py) as verified-against-contract, not verified-against-live.
+- **Live LLM call: deferred.** No `ANTHROPIC_API_KEY` is configured in the dev
+  environment, so the two LLM call sites — `codegen.generate_rewrite`
+  (Migration Copilot) and `enricher.draft_enrichment` (Metadata Enrichment) —
+  are verified at the prompt-construction/parse level (both fully unit tested:
+  the prompts contain only DataHub-verified column names, invented columns are
+  discarded on parse). The integration test stubs codegen deterministically
+  when the key is absent. Set `ANTHROPIC_API_KEY` and re-run
+  `sentinel migrate` / `sentinel enrich` to exercise them live.
 
 ## Repository layout
 

@@ -1,5 +1,5 @@
 .PHONY: venv install lint format typecheck test test-unit test-integration \
-        datahub-up datahub-down datahub-status seed demo clean
+        datahub-up datahub-down datahub-status seed seed-heal demo clean
 
 VENV := .venv
 PY := $(VENV)/bin/python
@@ -45,15 +45,26 @@ datahub-status:
 seed: install
 	$(PY) seed/seed_datahub.py
 
+# Re-seed the health signals as HEALTHY — run after a failing `sentinel
+# quality run` / `sentinel ml-check` pass to demo incident auto-resolution.
+seed-heal: install
+	$(PY) seed/seed_datahub.py --heal
+
 demo: install datahub-up
 	@echo "Waiting for DataHub GMS to become healthy..."
 	$(VENV)/bin/datahub docker check
 	$(MAKE) seed
 	@echo ""
-	@echo "DataHub is up at http://localhost:9002 (datahub/datahub) and seeded."
-	@echo "Try a Tier 1 feature:"
+	@echo "DataHub is up at http://localhost:9002 (datahub/datahub) and seeded (unhealthy demo state)."
+	@echo ""
+	@echo "Tier 1:"
 	@echo "  $(PY) -m sentinel.cli pr-impact --repo seed/sample_repo --base-ref HEAD~1"
-	@echo "  $(PY) -m sentinel.cli migrate --from <old_urn> --to <new_urn> --repo seed/sample_repo"
+	@echo "  $(PY) -m sentinel.cli migrate --from 'urn:li:dataset:(urn:li:dataPlatform:snowflake,analytics.orders_v1,PROD)' --to 'urn:li:dataset:(urn:li:dataPlatform:snowflake,analytics.orders_v2,PROD)' --repo seed/sample_repo"
+	@echo ""
+	@echo "Tier 2:"
+	@echo "  $(PY) -m sentinel.cli ml-check --urn 'urn:li:dataset:(urn:li:dataPlatform:postgres,raw.orders,PROD)'"
+	@echo "  $(PY) -m sentinel.cli quality run     # fails on seeded data; then: make seed-heal && re-run to auto-resolve"
+	@echo "  $(PY) -m sentinel.cli enrich --urn 'urn:li:dataset:(urn:li:dataPlatform:snowflake,analytics.customer_revenue_summary,PROD)'"
 
 clean:
 	rm -rf $(VENV) .pytest_cache .ruff_cache .mypy_cache
