@@ -94,6 +94,7 @@ class DataHubClient:
         )
         self._mcp_session: Any = None
         self._mcp_stack: AsyncExitStack | None = None
+        self._graph_client: Any = None
 
     @staticmethod
     def _auth_headers(settings: Settings) -> dict[str, str]:
@@ -271,6 +272,165 @@ class DataHubClient:
             variables["input"]["replacementUrn"] = replacement_urn
         data = self._graphql(query, variables)
         return bool(data["updateDeprecation"])
+
+    # ---------------------------------------------------------------- #
+    # SDK-backed reads/writes (sync) — profiles and native assertions
+    # ---------------------------------------------------------------- #
+
+    def _graph(self) -> Any:
+        """Lazily-constructed `DataHubGraph` for SDK operations that aren't
+        plain GraphQL (timeseries aspect reads). Verified against the
+        installed `acryl-datahub` package by introspection —
+        `get_latest_timeseries_value(entity_urn, aspect_type,
+        filter_criteria_map)` is a real, current signature."""
+        if getattr(self, "_graph_client", None) is None:
+            from datahub.ingestion.graph.client import DatahubClientConfig, DataHubGraph
+
+            self._graph_client = DataHubGraph(
+                DatahubClientConfig(
+                    server=self.settings.datahub_gms_url,
+                    token=self.settings.datahub_gms_token or None,
+                )
+            )
+        return self._graph_client
+
+    def get_latest_profile(self, dataset_urn: str) -> dict[str, Any] | None:
+        """Latest ingested DatasetProfile for the dataset, normalized to a
+        plain dict: `{rowCount, columnCount, timestampMillis, fieldProfiles:
+        {fieldPath: {nullCount, nullProportion, uniqueCount}}}`. Returns
+        None when no profile was ever ingested — the Quality Checker's
+        ingestion-driven mode treats that as SKIPPED, not FAILED, because
+        "we don't know" must never masquerade as "it's broken"."""
+        from datahub.metadata.schema_classes import DatasetProfileClass
+
+        profile = self._graph().get_latest_timeseries_value(dataset_urn, DatasetProfileClass, {})
+        if profile is None:
+            return None
+        return {
+            "rowCount": profile.rowCount,
+            "columnCount": profile.columnCount,
+            "timestampMillis": profile.timestampMillis,
+            "fieldProfiles": {
+                fp.fieldPath: {
+                    "nullCount": fp.nullCount,
+                    "nullProportion": fp.nullProportion,
+                    "uniqueCount": fp.uniqueCount,
+                }
+                for fp in (profile.fieldProfiles or [])
+            },
+        }
+
+    def write_assertion_result(
+        self,
+        dataset_urn: str,
+        check_name: str,
+        check_type: str,
+        success: bool,
+        details: dict[str, str],
+        column: str | None = None,
+        threshold_percentage: float | None = None,
+        sql: str | None = None,
+        operator: str | None = None,
+        expected_value: str | None = None,
+    ) -> str:
+        """Writes a native (non-deprecated) Assertion entity plus an
+        AssertionRunEvent for one Quality Checker evaluation, and returns
+        the assertion URN. The assertion URN is a stable guid of
+        (dataset, check name), so re-runs append run events to the same
+        assertion instead of minting a new entity per run — that's what
+        makes the assertion's history readable in the DataHub UI.
+
+        Aspect constructor signatures verified by introspecting the
+        installed `acryl-datahub` package (see the Quality Checker's
+        ARCHITECTURE.md notes): FIELD -> FieldAssertionInfo(FIELD_METRIC,
+        NULL_PERCENTAGE), VOLUME -> VolumeAssertionInfo(ROW_COUNT_TOTAL),
+        SQL -> SqlAssertionInfo(METRIC)."""
+        import datahub.emitter.mce_builder as builder
+        import datahub.metadata.schema_classes as m
+        from datahub.emitter.mcp import MetadataChangeProposalWrapper
+
+        def _params(value: str) -> m.AssertionStdParametersClass:
+            return m.AssertionStdParametersClass(
+                value=m.AssertionStdParameterClass(
+                    value=value, type=m.AssertionStdParameterTypeClass.NUMBER
+                )
+            )
+
+        info = m.AssertionInfoClass(
+            type=m.AssertionTypeClass.FIELD,
+            description=f"Sentinel quality check '{check_name}' ({check_type}) on {dataset_urn}",
+        )
+        if check_type == "not_null_rate":
+            info.type = m.AssertionTypeClass.FIELD
+            info.fieldAssertion = m.FieldAssertionInfoClass(
+                type=m.FieldAssertionTypeClass.FIELD_METRIC,
+                entity=dataset_urn,
+                fieldMetricAssertion=m.FieldMetricAssertionClass(
+                    field=m.SchemaFieldSpecClass(
+                        path=column or "", type="unknown", nativeType="unknown"
+                    ),
+                    metric=m.FieldMetricTypeClass.NULL_PERCENTAGE,
+                    operator=m.AssertionStdOperatorClass.LESS_THAN_OR_EQUAL_TO,
+                    parameters=_params(str(threshold_percentage or 0.0)),
+                ),
+            )
+        elif check_type == "row_count_not_zero":
+            info.type = m.AssertionTypeClass.VOLUME
+            info.volumeAssertion = m.VolumeAssertionInfoClass(
+                type=m.VolumeAssertionTypeClass.ROW_COUNT_TOTAL,
+                entity=dataset_urn,
+                rowCountTotal=m.RowCountTotalClass(
+                    operator=m.AssertionStdOperatorClass.GREATER_THAN,
+                    parameters=_params("0"),
+                ),
+            )
+        elif check_type == "custom_sql":
+            info.type = m.AssertionTypeClass.SQL
+            info.sqlAssertion = m.SqlAssertionInfoClass(
+                type=m.SqlAssertionTypeClass.METRIC,
+                entity=dataset_urn,
+                statement=sql or "",
+                operator=getattr(
+                    m.AssertionStdOperatorClass,
+                    operator or "EQUAL_TO",
+                    m.AssertionStdOperatorClass.EQUAL_TO,
+                ),
+                parameters=_params(expected_value or "0"),
+            )
+        else:
+            raise ValueError(f"unknown quality check type {check_type!r}")
+
+        assertion_urn = builder.make_assertion_urn(
+            builder.datahub_guid({"entity": dataset_urn, "check": check_name})
+        )
+        import time as _time
+
+        now = int(_time.time() * 1000)
+        run_event = m.AssertionRunEventClass(
+            timestampMillis=now,
+            runId=f"sentinel-quality-{now}",
+            asserteeUrn=dataset_urn,
+            status=m.AssertionRunStatusClass.COMPLETE,
+            assertionUrn=assertion_urn,
+            result=m.AssertionResultClass(
+                type=m.AssertionResultTypeClass.SUCCESS
+                if success
+                else m.AssertionResultTypeClass.FAILURE,
+                nativeResults=details,
+            ),
+        )
+        emitter = make_rest_emitter(self.settings)
+        emitter.emit_mcp(MetadataChangeProposalWrapper(entityUrn=assertion_urn, aspect=info))
+        emitter.emit_mcp(MetadataChangeProposalWrapper(entityUrn=assertion_urn, aspect=run_event))
+        logger.info(
+            "wrote assertion %s (%s) result=%s for %s: %s",
+            assertion_urn,
+            check_type,
+            "SUCCESS" if success else "FAILURE",
+            dataset_urn,
+            details,
+        )
+        return assertion_urn
 
     # ---------------------------------------------------------------- #
     # MCP tools (async)

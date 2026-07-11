@@ -34,6 +34,11 @@ class FakeDataHubClient:
     # dataset urn -> normalized assertion dicts, same shape
     # DataHubClient.get_assertions_with_latest_run returns
     assertions: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    # dataset urn -> normalized profile dict, same shape
+    # DataHubClient.get_latest_profile returns
+    profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # every write_assertion_result call, newest last
+    assertion_results: list[dict[str, Any]] = field(default_factory=list)
     calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     _next_incident_id: int = 0
 
@@ -93,6 +98,44 @@ class FakeDataHubClient:
     def get_assertions_with_latest_run(self, dataset_urn: str) -> list[dict[str, Any]]:
         self._record("get_assertions_with_latest_run", dataset_urn=dataset_urn)
         return self.assertions.get(dataset_urn, [])
+
+    def get_latest_profile(self, dataset_urn: str) -> dict[str, Any] | None:
+        self._record("get_latest_profile", dataset_urn=dataset_urn)
+        return self.profiles.get(dataset_urn)
+
+    def write_assertion_result(
+        self,
+        dataset_urn: str,
+        check_name: str,
+        check_type: str,
+        success: bool,
+        details: dict[str, str],
+        **kwargs: Any,
+    ) -> str:
+        urn = f"urn:li:assertion:fake-{check_name}"
+        record = {
+            "assertion_urn": urn,
+            "dataset_urn": dataset_urn,
+            "check_name": check_name,
+            "check_type": check_type,
+            "success": success,
+            "details": details,
+            **kwargs,
+        }
+        self.assertion_results.append(record)
+        self._record("write_assertion_result", **record)
+        # keep the assertions view consistent so ml-check sees quality results
+        entry = {
+            "urn": urn,
+            "type": check_type,
+            "description": f"quality check {check_name}",
+            "latest_result": "SUCCESS" if success else "FAILURE",
+            "native_results": dict(details),
+        }
+        existing = self.assertions.setdefault(dataset_urn, [])
+        existing[:] = [a for a in existing if a["urn"] != urn]
+        existing.append(entry)
+        return urn
 
     def update_deprecation(
         self, urn: str, deprecated: bool, note: str, replacement_urn: str | None = None

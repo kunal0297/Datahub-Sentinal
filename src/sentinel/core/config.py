@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     # Where core/proposal_engine.py persists its pending/accepted/rejected
     # proposal store (a plain JSON file — inspectable and diffable by design).
     sentinel_proposals_path: str = "proposals.json"
+    # Optional sqlite database for the Quality Checker's warehouse mode.
+    # Empty means ingestion-driven mode only (the credential-free demo path).
+    sentinel_warehouse_sqlite_path: str = ""
     sentinel_lineage_hop_limit: int = 3
     # Off by default: a hackathon demo of a tool that blocks merges by
     # default reads as hostile, not helpful (per spec Section 5.1 step 7).

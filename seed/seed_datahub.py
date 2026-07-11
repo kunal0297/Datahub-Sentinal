@@ -37,6 +37,7 @@ Graph built (see README/Section 10 for the full narrative):
 
 from __future__ import annotations
 
+import argparse
 import os
 import time
 
@@ -144,8 +145,38 @@ class Seeder:
         self.emit(urn, models.DomainPropertiesClass(name=name, description=description))
         return urn
 
+    def profile(self, urn: str, row_count: int, field_nulls: dict[str, tuple[int, float]]) -> None:
+        """Emits a DatasetProfile timeseries aspect — what the Quality
+        Checker's ingestion-driven mode evaluates, so the demo needs no
+        warehouse credentials."""
+        self.emit(
+            urn,
+            models.DatasetProfileClass(
+                timestampMillis=now_millis(),
+                rowCount=row_count,
+                columnCount=len(field_nulls) or None,
+                fieldProfiles=[
+                    models.DatasetFieldProfileClass(
+                        fieldPath=path, nullCount=null_count, nullProportion=null_proportion
+                    )
+                    for path, (null_count, null_proportion) in field_nulls.items()
+                ],
+            ),
+        )
+
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--heal",
+        action="store_true",
+        help="Re-seed the health signals as HEALTHY (passing freshness run, "
+        "clean discount_pct null rate) — run this after the failing demo pass "
+        "to show the Quality Checker and Incident Engine auto-resolving.",
+    )
+    args = parser.parse_args()
+    heal: bool = args.heal
+
     emitter = DatahubRestEmitter(gms_server=GMS_URL, token=GMS_TOKEN)
     emitter.test_connection()
     s = Seeder(emitter)
@@ -432,7 +463,33 @@ def main() -> None:
         ),
     )
 
-    # -- failing freshness assertion on raw.orders (feeds the ML chain) -------
+    # -- dataset profiles (Quality Checker's ingestion-driven mode) -----------
+    # raw.orders ships with a deliberately bad discount_pct null rate (34%)
+    # so `sentinel quality run` fails on first demo run; --heal re-emits a
+    # clean profile so the next run auto-resolves the incident.
+    s.profile(
+        raw_orders,
+        row_count=48213,
+        field_nulls={
+            "order_id": (0, 0.0),
+            "customer_id": (12, 0.0002),
+            "discount_pct": ((96, 0.002) if heal else (16392, 0.34)),
+        },
+    )
+    s.profile(
+        staging_orders_cleaned,
+        row_count=48102,
+        field_nulls={"order_id": (0, 0.0), "discount_pct": (48, 0.001)},
+    )
+    s.profile(
+        orders_v2,
+        row_count=47990,
+        field_nulls={"order_id": (0, 0.0), "total_amount_usd": (0, 0.0)},
+    )
+
+    # -- freshness assertion on raw.orders (feeds the ML chain) ---------------
+    # FAILING on the default seed pass — the ML Blast Radius check traces
+    # this to fraud_detection_v3; --heal re-emits a SUCCESS run.
     assertion_urn = builder.make_assertion_urn(
         builder.datahub_guid({"entity": raw_orders, "type": "freshness-daily-6am"})
     )
@@ -455,18 +512,26 @@ def main() -> None:
         assertion_urn,
         models.AssertionRunEventClass(
             timestampMillis=now_millis(),
-            runId="seed-run-1",
+            runId="seed-run-heal" if heal else "seed-run-1",
             asserteeUrn=raw_orders,
             status=models.AssertionRunStatusClass.COMPLETE,
             assertionUrn=assertion_urn,
-            result=models.AssertionResultClass(
-                type=models.AssertionResultTypeClass.FAILURE,
-                nativeResults={"reason": "no new rows landed since yesterday 23:10 UTC"},
+            result=(
+                models.AssertionResultClass(
+                    type=models.AssertionResultTypeClass.SUCCESS,
+                    nativeResults={"reason": "fresh rows landed 04:52 UTC"},
+                )
+                if heal
+                else models.AssertionResultClass(
+                    type=models.AssertionResultTypeClass.FAILURE,
+                    nativeResults={"reason": "no new rows landed since yesterday 23:10 UTC"},
+                )
             ),
         ),
     )
 
-    print(f"Seeded {s.emitted} aspects against {GMS_URL}")
+    health = "HEALTHY (--heal)" if heal else "UNHEALTHY (default demo state)"
+    print(f"Seeded {s.emitted} aspects against {GMS_URL} — health signals: {health}")
     print(f"  raw.orders            = {raw_orders}")
     print(f"  raw.customers         = {raw_customers}")
     print(f"  raw.payments          = {raw_payments} (deliberately ownerless)")

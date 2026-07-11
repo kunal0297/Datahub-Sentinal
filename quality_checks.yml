@@ -1,0 +1,29 @@
+# Quality-as-code config for `sentinel quality run` (Tier 2 MVP).
+# Each check targets a DataHub dataset URN. Two evaluation modes:
+#   - ingestion (default): evaluated against the dataset's latest ingested
+#     DataHub profile — no warehouse credentials needed. custom_sql checks
+#     are SKIPPED (visibly) in this mode.
+#   - warehouse: real SQL against a configured connection (the MVP ships a
+#     sqlite backend; see agents/quality_checker/checker.py).
+#
+# These defaults target the seeded demo graph (seed/seed_datahub.py):
+# raw.orders is seeded with a deliberately bad discount_pct null rate, so
+# the first run fails and raises an incident; re-seeding with --heal and
+# re-running auto-resolves it.
+checks:
+  - urn: "urn:li:dataset:(urn:li:dataPlatform:postgres,raw.orders,PROD)"
+    name: orders-discount-not-null
+    type: not_null_rate
+    column: discount_pct
+    max_null_proportion: 0.05
+
+  - urn: "urn:li:dataset:(urn:li:dataPlatform:postgres,raw.orders,PROD)"
+    name: orders-row-count
+    type: row_count_not_zero
+
+  - urn: "urn:li:dataset:(urn:li:dataPlatform:snowflake,analytics.orders_v2,PROD)"
+    name: orders-v2-no-negative-totals
+    type: custom_sql
+    sql: "SELECT COUNT(*) FROM orders_v2 WHERE total_amount_usd < 0"
+    expect: "== 0"
+    table: orders_v2

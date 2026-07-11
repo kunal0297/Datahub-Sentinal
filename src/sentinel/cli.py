@@ -254,6 +254,82 @@ def ml_check(
     asyncio.run(_run())
 
 
+quality_app = typer.Typer(
+    help="Quality Checking: evaluate quality_checks.yml, write native "
+    "assertions back to DataHub, raise/auto-resolve incidents."
+)
+app.add_typer(quality_app, name="quality")
+
+
+@quality_app.command("run")
+def quality_run(
+    config: Annotated[
+        Path | None, typer.Option(help="Path to quality_checks.yml (defaults to Settings).")
+    ] = None,
+    mode: Annotated[
+        str,
+        typer.Option(
+            help="'ingestion' (DataHub profiling stats, no credentials — the demo "
+            "default), 'warehouse' (real SQL via the configured sqlite backend), or "
+            "'auto' (warehouse if SENTINEL_WAREHOUSE_SQLITE_PATH is set, else ingestion)."
+        ),
+    ] = "auto",
+    hop_limit: Annotated[
+        int | None, typer.Option(help="Blast-radius hop limit for severity (defaults to Settings).")
+    ] = None,
+) -> None:
+    """Run every declared quality check once. Cron-friendly: schedule this
+    command (see README for a GitHub Actions scheduled-workflow example);
+    exits 1 if any check FAILED so schedulers can alert on it."""
+    from sentinel.agents.quality_checker.checker import (
+        SqliteWarehouse,
+        load_checks,
+        run_quality_checks,
+    )
+    from sentinel.core.config import get_settings
+    from sentinel.core.datahub_client import DataHubClient
+    from sentinel.core.incident_engine import IncidentEngine, SeverityRules
+    from sentinel.integrations.notifiers.jira import JiraNotifier
+    from sentinel.integrations.notifiers.slack import SlackNotifier
+    from sentinel.integrations.notifiers.teams import TeamsNotifier
+
+    settings = get_settings()
+    checks = load_checks(config or Path(settings.sentinel_quality_checks_path))
+    severity_rules = SeverityRules.from_yaml(settings.sentinel_severity_rules_path)
+
+    resolved_mode = mode
+    warehouse = None
+    if mode == "auto":
+        resolved_mode = "warehouse" if settings.sentinel_warehouse_sqlite_path else "ingestion"
+    if resolved_mode == "warehouse":
+        if not settings.sentinel_warehouse_sqlite_path:
+            typer.echo("warehouse mode needs SENTINEL_WAREHOUSE_SQLITE_PATH set.", err=True)
+            raise typer.Exit(1)
+        warehouse = SqliteWarehouse(settings.sentinel_warehouse_sqlite_path)
+
+    async def _run() -> None:
+        with DataHubClient(settings) as client:
+            engine = IncidentEngine(
+                client,
+                severity_rules,
+                notifiers=[SlackNotifier(settings), JiraNotifier(), TeamsNotifier()],
+            )
+            async with client.mcp():
+                report = await run_quality_checks(
+                    client,
+                    engine,
+                    checks,
+                    mode=resolved_mode,
+                    warehouse=warehouse,
+                    hop_limit=hop_limit or settings.sentinel_lineage_hop_limit,
+                )
+        typer.echo(report.to_markdown())
+        if report.failed:
+            raise typer.Exit(1)
+
+    asyncio.run(_run())
+
+
 proposals_app = typer.Typer(
     help="Review Sentinel-drafted metadata change proposals. Accepting a "
     "proposal is the ONLY path by which drafted metadata reaches DataHub."
