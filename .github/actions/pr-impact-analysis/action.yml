@@ -1,0 +1,43 @@
+name: "DataHub Sentinel: PR Impact Analysis"
+description: >-
+  Resolves changed SQL/dbt files to DataHub assets, diffs their schema
+  against the current DataHub state, walks the blast radius, comments on
+  the PR, and raises a DataHub incident on HIGH/CRITICAL severity.
+author: "DataHub Sentinel"
+branding:
+  icon: "alert-triangle"
+  color: "red"
+
+inputs:
+  datahub_gms_url:
+    description: "DataHub GMS URL"
+    required: true
+  datahub_gms_token:
+    description: "DataHub personal access token (blank is fine for an unauthenticated local quickstart)"
+    required: false
+    default: ""
+  github_token:
+    description: "Token used to read PR files and post/update the comment (usually secrets.GITHUB_TOKEN)"
+    required: true
+  hop_limit:
+    description: "Downstream lineage hop limit for blast-radius analysis"
+    required: false
+    default: "3"
+  block_on_critical:
+    description: >-
+      Fail this check (blocking merge via branch protection) when overall
+      severity is CRITICAL. Off by default — see README "Known limitations".
+    required: false
+    default: "false"
+  manifest_path:
+    description: "Path (relative to the repo root) to a dbt manifest.json, if available"
+    required: false
+    default: ""
+
+runs:
+  using: "docker"
+  image: "Dockerfile"
+  env:
+    DATAHUB_GMS_URL: ${{ inputs.datahub_gms_url }}
+    DATAHUB_GMS_TOKEN: ${{ inputs.datahub_gms_token }}
+    GITHUB_TOKEN: ${{ inputs.github_token }}

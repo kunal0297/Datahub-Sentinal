@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     sentinel_severity_rules_path: str = "config/severity_rules.yml"
     sentinel_quality_checks_path: str = "quality_checks.yml"
     sentinel_lineage_hop_limit: int = 3
+    # Off by default: a hackathon demo of a tool that blocks merges by
+    # default reads as hostile, not helpful (per spec Section 5.1 step 7).
+    # Opt in via the Action's `block_on_critical` input / this env var.
+    sentinel_block_on_critical: bool = False
 
 
 def get_settings() -> Settings:
