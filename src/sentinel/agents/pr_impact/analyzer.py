@@ -92,6 +92,26 @@ def resolve_file_to_urn(file_path: Path, manifest_path: Path | None = None) -> R
     return ResolvedFile(path=str(file_path), urn=None, method="unresolved")
 
 
+def find_files_for_urns(repo_root: Path, urns: set[str]) -> dict[str, Path]:
+    """The reverse of `resolve_file_to_urn`: given a set of URNs (e.g. the
+    Migration Copilot's blast-radius consumers), scan `repo_root` for
+    `.datahub.yml` sidecars and return whichever of those URNs actually map
+    to a file in this repo. Only the sidecar convention is scanned — the
+    manifest.json path has no reverse-lookup equivalent implemented (it
+    isn't exercised by the demo either; see `_resolve_via_manifest`)."""
+    found: dict[str, Path] = {}
+    for sidecar in repo_root.rglob("*.datahub.yml"):
+        data = yaml.safe_load(sidecar.read_text()) or {}
+        urn = data.get("urn")
+        if urn in urns:
+            # "orders_v1.datahub.yml" -> "orders_v1.sql" (mirrors
+            # resolve_file_to_urn's file_path.with_suffix(".datahub.yml"))
+            source_file = sidecar.with_suffix("").with_suffix(".sql")
+            if source_file.exists():
+                found[urn] = source_file
+    return found
+
+
 # --------------------------------------------------------------------- #
 # SQL column extraction (best-effort — covers plain SELECT lists with
 # optional `AS` aliases and parenthesized expressions; not a general SQL

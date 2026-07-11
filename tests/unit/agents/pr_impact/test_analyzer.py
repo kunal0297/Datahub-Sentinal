@@ -5,6 +5,7 @@ import pytest
 from sentinel.agents.pr_impact.analyzer import (
     analyze_files,
     extract_select_columns,
+    find_files_for_urns,
     render_pr_comment,
     resolve_file_to_urn,
 )
@@ -59,6 +60,22 @@ class TestResolveFileToUrn:
         resolved = resolve_file_to_urn(model_file, manifest_path=manifest)
         assert resolved.method == "manifest"
         assert resolved.urn == "urn:li:dataset:(urn:li:dataPlatform:dbt,analytics.orders_v1,PROD)"
+
+
+class TestFindFilesForUrns:
+    def test_finds_real_sample_repo_files_by_urn(self):
+        revenue_summary_urn = (
+            "urn:li:dataset:(urn:li:dataPlatform:snowflake,analytics.customer_revenue_summary,PROD)"
+        )
+        found = find_files_for_urns(SAMPLE_REPO, {ORDERS_V1, revenue_summary_urn})
+        assert found[ORDERS_V1] == SAMPLE_REPO / "orders_v1.sql"
+        assert found[revenue_summary_urn] == SAMPLE_REPO / "customer_revenue_summary.sql"
+
+    def test_urns_not_present_in_repo_are_absent_from_result(self):
+        found = find_files_for_urns(
+            SAMPLE_REPO, {"urn:li:dataset:(urn:li:dataPlatform:x,ghost,PROD)"}
+        )
+        assert found == {}
 
 
 class TestExtractSelectColumns:

@@ -131,7 +131,17 @@ assume. Findings as of this writing (2026-07), sources linked inline:
   `datahub docker quickstart` instance, because the dev machine had ~145MB free
   RAM and 86% swap utilization at the time (the quickstart's 14-container stack
   recommends 8GB free). Run `make demo` once there's headroom to complete this
-  check — see the Makefile's `datahub-up`/`seed` targets.
+  check — see the Makefile's `datahub-up`/`seed` targets. The same constraint
+  means PR Impact Analysis and the Migration Copilot are verified against
+  `FakeDataHubClient` (112 unit tests) but not yet end-to-end against a live
+  GMS — re-run `sentinel pr-impact` / `sentinel migrate` once `make demo` has
+  completed to close that gap.
+- **Live LLM call: deferred.** No `ANTHROPIC_API_KEY` is configured in this
+  environment, so `codegen.generate_rewrite` (Migration Copilot) has only been
+  verified at the prompt-construction level (`build_codegen_prompt`, fully unit
+  tested) — the actual API call is thin, untested-beyond-that wrapper code, per
+  the spec's own Definition of Done for this module. Set `ANTHROPIC_API_KEY`
+  and re-run `sentinel migrate` to exercise it live.
 
 ## Repository layout
 

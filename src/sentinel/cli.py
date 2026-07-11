@@ -100,5 +100,120 @@ def pr_impact(
     asyncio.run(_run())
 
 
+migrate_app = typer.Typer(
+    help="Schema Migration Copilot: infer the column mapping, walk lineage, "
+    "generate consumer rewrites, and track migration status."
+)
+app.add_typer(migrate_app, name="migrate")
+
+
+@migrate_app.callback(invoke_without_command=True)
+def migrate(
+    ctx: typer.Context,
+    from_urn: Annotated[str, typer.Option("--from", help="Old asset URN.")] = "",
+    to_urn: Annotated[str, typer.Option("--to", help="New asset URN.")] = "",
+    repo: Annotated[Path, typer.Option(help="Target repo containing consumer files.")] = Path(
+        "seed/sample_repo"
+    ),
+    hop_limit: Annotated[
+        int | None, typer.Option(help="Downstream lineage hop limit (defaults to Settings).")
+    ] = None,
+) -> None:
+    """Run the migration: infer the column mapping (printed for review
+    before anything else happens), walk downstream lineage, generate a
+    rewrite for every consumer matched to a file in `repo`, write a patch
+    per consumer, record status, and mark the old asset deprecated with a
+    link to the new one."""
+    if ctx.invoked_subcommand is not None:
+        return
+    if not from_urn or not to_urn:
+        typer.echo("Both --from and --to are required.", err=True)
+        raise typer.Exit(1)
+
+    from sentinel.agents.migration_copilot.orchestrator import run_migration
+    from sentinel.core.config import get_settings
+    from sentinel.core.datahub_client import DataHubClient
+
+    settings = get_settings()
+
+    async def _run() -> None:
+        with DataHubClient(settings) as client:
+            async with client.mcp():
+                result = await run_migration(
+                    client,
+                    settings,
+                    from_urn,
+                    to_urn,
+                    repo_root=repo,
+                    hop_limit=hop_limit or settings.sentinel_lineage_hop_limit,
+                )
+
+        typer.echo("Inferred column mapping (review before merging any patch):")
+        for line in result.plan.review_lines():
+            typer.echo(f"  {line}")
+
+        typer.echo(f"\nWrote {len(result.records)} patch(es):")
+        for r in result.records:
+            typer.echo(f"  [{r.status}] {r.file_path} -> {r.link}")
+
+        if result.unmatched_consumer_urns:
+            typer.echo(
+                f"\n{len(result.unmatched_consumer_urns)} consumer(s) had no matching "
+                f"file in {repo} (reported, not silently dropped):"
+            )
+            for u in result.unmatched_consumer_urns:
+                typer.echo(f"  {u}")
+
+        typer.echo(f"\nDeprecation link written to DataHub: {result.deprecation_written}")
+        typer.echo(f"Status tracked at {repo / 'migration_status.json'}")
+
+    asyncio.run(_run())
+
+
+@migrate_app.command("status")
+def migrate_status(
+    from_urn: Annotated[
+        str, typer.Option("--from", help="Old asset URN (for reference; not used to filter).")
+    ] = "",
+    repo: Annotated[Path, typer.Option(help="Repo containing migration_status.json.")] = Path(
+        "seed/sample_repo"
+    ),
+) -> None:
+    """Reload migration_status.json, refresh real-GitHub PR statuses if a
+    GITHUB_TOKEN is configured, and print the current status — the CLI
+    refresh this spec calls for instead of a webhook listener."""
+    from sentinel.agents.migration_copilot.tracker import MigrationTracker
+    from sentinel.agents.pr_impact.github_client import GitHubClient
+    from sentinel.core.config import get_settings
+
+    status_path = repo / "migration_status.json"
+    if not status_path.exists():
+        typer.echo(f"No migration_status.json found at {status_path}.", err=True)
+        raise typer.Exit(1)
+
+    tracker = MigrationTracker.load(status_path)
+    if from_urn and from_urn != tracker.old_urn:
+        typer.echo(
+            f"Warning: --from {from_urn!r} does not match the tracked migration's "
+            f"old_urn {tracker.old_urn!r}.",
+            err=True,
+        )
+
+    settings = get_settings()
+    github_client = None
+    if settings.github_token:
+        first_pr_link = next(
+            (r.link for r in tracker.records if r.status == "pr_opened" and r.link), None
+        )
+        if first_pr_link and "github.com" in first_pr_link:
+            owner_repo = "/".join(first_pr_link.split("/")[3:5])
+            github_client = GitHubClient(settings.github_token, owner_repo)
+
+    tracker.refresh(github_client)
+    tracker.save(status_path)
+    for line in tracker.summary_lines():
+        typer.echo(line)
+
+
 if __name__ == "__main__":
     app()
