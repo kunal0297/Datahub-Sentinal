@@ -74,9 +74,9 @@ python -m sentinel.cli migrate status --repo seed/sample_repo
 **Narration:**
 > "Migrating orders_v1 to v2. Sentinel pulls both real schemas from
 > DataHub, infers the column mapping — and prints it for review before
-> touching anything. Then it finds every consumer via lineage and has
-> Claude rewrite each one, constrained to the DataHub-verified mapping:
-> the model is never allowed to invent a column. One reviewable patch per
+> touching anything. Then it finds every consumer via lineage and has the
+> LLM rewrite each one, constrained to the DataHub-verified mapping: the
+> model is never allowed to invent a column. One reviewable patch per
 > consumer, one tracker for the whole migration."
 
 **Cut to:** DataHub UI, `orders_v1` entity page showing the deprecation
