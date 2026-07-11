@@ -21,7 +21,7 @@ format:
 	$(VENV)/bin/ruff check --fix src tests seed
 
 typecheck:
-	$(VENV)/bin/mypy src/sentinel/core
+	$(VENV)/bin/mypy src/sentinel
 
 test-unit:
 	$(VENV)/bin/pytest tests/unit -v

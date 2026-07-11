@@ -49,7 +49,7 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
-packages = ["sentinel.core"]
+packages = ["sentinel"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
