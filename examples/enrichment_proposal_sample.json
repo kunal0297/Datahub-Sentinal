@@ -1,0 +1,57 @@
+{
+  "_comment": "Real, generated output of agents/metadata_enrichment/enricher.py's run_enrichment against a FakeDataHubClient seeded to mirror seed/seed_datahub.py, targeting the deliberately under-documented analytics.customer_revenue_summary. This is the proposals.json store core/proposal_engine.py writes: every proposal is PENDING (nothing reaches DataHub until `sentinel proposals accept <id>`), each carries the evidence that grounds it, and loyalty_score got NO proposal \u2014 the drafter refused it for insufficient context rather than inventing meaning. Draft text produced with the agent's deterministic test drafter (no ANTHROPIC_API_KEY in the generation environment); the grounding/refusal behavior shown is exactly what the prompt in enricher.py enforces on the live model.",
+  "proposals": [
+    {
+      "id": "df60ff05",
+      "target_urn": "urn:li:dataset:(urn:li:dataPlatform:snowflake,analytics.customer_revenue_summary,PROD)",
+      "change_type": "description",
+      "field_path": null,
+      "proposed_value": "Per-customer revenue rollup built from analytics.orders_v1 (the canonical orders mart). Consumers query it for top-customer revenue rankings and for revenue joined to customer signup cohorts.",
+      "rationale": "Grounded in: upstream analytics.orders_v1 description ('Canonical orders mart'); two sample queries aggregating net_revenue per customer_id",
+      "source_agent": "metadata-enrichment",
+      "status": "PENDING",
+      "created_at": "2026-07-11T20:16:58.278209Z",
+      "decided_at": null,
+      "decided_by": null
+    },
+    {
+      "id": "bd6967dc",
+      "target_urn": "urn:li:dataset:(urn:li:dataPlatform:snowflake,analytics.customer_revenue_summary,PROD)",
+      "change_type": "column_description",
+      "field_path": "customer_id",
+      "proposed_value": "Customer identifier; joins to raw.customers (used as the join key in observed queries).",
+      "rationale": "Grounded in: existing column description; JOIN raw.customers USING (customer_id) in sample query",
+      "source_agent": "metadata-enrichment",
+      "status": "PENDING",
+      "created_at": "2026-07-11T20:16:58.278500Z",
+      "decided_at": null,
+      "decided_by": null
+    },
+    {
+      "id": "97ae8049",
+      "target_urn": "urn:li:dataset:(urn:li:dataPlatform:snowflake,analytics.customer_revenue_summary,PROD)",
+      "change_type": "column_description",
+      "field_path": "net_revenue",
+      "proposed_value": "Revenue per customer after discounts, in USD; ranked and summed by downstream consumers.",
+      "rationale": "Grounded in: ORDER BY net_revenue DESC and SUM(net_revenue) in sample queries; upstream orders mart carries USD amounts",
+      "source_agent": "metadata-enrichment",
+      "status": "PENDING",
+      "created_at": "2026-07-11T20:16:58.278777Z",
+      "decided_at": null,
+      "decided_by": null
+    },
+    {
+      "id": "0cd55fb0",
+      "target_urn": "urn:li:dataset:(urn:li:dataPlatform:snowflake,analytics.customer_revenue_summary,PROD)",
+      "change_type": "column_description",
+      "field_path": "completed_orders",
+      "proposed_value": "Count of the customer's completed orders; used as an activity filter (completed_orders > 5) by consumers.",
+      "rationale": "Grounded in: WHERE completed_orders > 5 in sample query",
+      "source_agent": "metadata-enrichment",
+      "status": "PENDING",
+      "created_at": "2026-07-11T20:16:58.279059Z",
+      "decided_at": null,
+      "decided_by": null
+    }
+  ]
+}
