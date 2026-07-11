@@ -1,0 +1,22 @@
+# DataHub OSS itself is brought up via `datahub docker quickstart` (see
+# Makefile's `datahub-up` target and ARCHITECTURE.md "DataHub API surface" for
+# why this repo doesn't hand-roll DataHub's own ~14-container compose stack).
+#
+# This file is for Sentinel-owned services only. Today, none of the Tier 1
+# features require a long-lived process (they're CLI/Action-triggered), so
+# there's nothing to define yet. It's kept as a real, working compose file
+# (not a stub) so the Quality Checker's optional scheduled mode
+# (docs/roadmap: cron-friendly today, see agents/quality_checker) has a place
+# to plug in a `scheduler` service without inventing new project structure.
+#
+# `datahub docker quickstart` creates an external Docker network named
+# `datahub_network` that any Sentinel service here would join to reach GMS at
+# http://datahub-gms:8080 (in-network) — from the host, DATAHUB_GMS_URL stays
+# http://localhost:8080 as in .env.example.
+
+networks:
+  datahub_network:
+    external: true
+    name: datahub_network
+
+services: {}

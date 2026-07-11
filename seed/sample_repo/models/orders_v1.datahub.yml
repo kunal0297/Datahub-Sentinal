@@ -1,0 +1,6 @@
+# Sidecar URN mapping (fallback #2 in PR Impact Analysis's file-to-URN
+# resolution order — see agents/pr_impact/analyzer.py and README "Quickstart").
+# Used when no dbt manifest.json is available, which is the case for this
+# demo repo on purpose: it lets a judge run the demo without a real dbt
+# project or warehouse connection.
+urn: "urn:li:dataset:(urn:li:dataPlatform:snowflake,analytics.orders_v1,PROD)"
