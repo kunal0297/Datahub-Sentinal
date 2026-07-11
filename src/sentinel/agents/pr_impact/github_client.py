@@ -7,6 +7,7 @@ a verification note.
 
 from __future__ import annotations
 
+import base64
 import logging
 
 import httpx
@@ -103,3 +104,58 @@ class GitHubClient:
         )
         resp.raise_for_status()
         return resp.text
+
+    # ------------------------------------------------------------------ #
+    # Branch + PR creation — used by the Migration Copilot's real-GitHub
+    # mode (agents/migration_copilot/pr_writer.py). Not exercised by the
+    # self-contained demo, which uses LocalPatchWriter instead (see that
+    # module's docstring) since opening a live PR needs a real external
+    # repo + token, which Section 3's demo constraint rules out.
+    # ------------------------------------------------------------------ #
+
+    def get_branch_sha(self, branch: str) -> str:
+        resp = self._http.get(f"/repos/{self.repo}/git/ref/heads/{branch}")
+        resp.raise_for_status()
+        return str(resp.json()["object"]["sha"])
+
+    def create_branch(self, branch: str, from_sha: str) -> dict:
+        resp = self._http.post(
+            f"/repos/{self.repo}/git/refs",
+            json={"ref": f"refs/heads/{branch}", "sha": from_sha},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def create_or_update_file(self, path: str, content: str, branch: str, message: str) -> dict:
+        """PUT contents API: creates the file if absent, updates it (using
+        its current sha) if present."""
+        existing_sha = None
+        existing = self._http.get(f"/repos/{self.repo}/contents/{path}", params={"ref": branch})
+        if existing.status_code == 200:
+            existing_sha = existing.json().get("sha")
+
+        body = {
+            "message": message,
+            "content": base64.b64encode(content.encode()).decode(),
+            "branch": branch,
+        }
+        if existing_sha:
+            body["sha"] = existing_sha
+        resp = self._http.put(f"/repos/{self.repo}/contents/{path}", json=body)
+        resp.raise_for_status()
+        return resp.json()
+
+    def create_pull_request(self, title: str, head: str, base: str, body: str) -> dict:
+        resp = self._http.post(
+            f"/repos/{self.repo}/pulls",
+            json={"title": title, "head": head, "base": base, "body": body},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_pull_request(self, pr_number: int) -> dict:
+        """Used by the Migration Copilot's tracker to refresh status (has a
+        previously-opened PR merged yet?) without a webhook listener."""
+        resp = self._http.get(f"/repos/{self.repo}/pulls/{pr_number}")
+        resp.raise_for_status()
+        return resp.json()
