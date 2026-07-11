@@ -20,7 +20,9 @@ class Settings(BaseSettings):
 
     # Anthropic
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-sonnet-5"
+    # No model is hardcoded as gospel -- this is just the default. Override via
+    # ANTHROPIC_MODEL; check docs.claude.com for the current recommended model.
+    anthropic_model: str = "claude-opus-4-8"
 
     # GitHub
     github_token: str = ""

@@ -6,7 +6,7 @@ def test_settings_defaults_require_no_env(monkeypatch):
         monkeypatch.delenv(var.upper(), raising=False)
     settings = Settings(_env_file=None)
     assert settings.datahub_gms_url == "http://localhost:8080"
-    assert settings.anthropic_model == "claude-sonnet-5"
+    assert settings.anthropic_model == "claude-opus-4-8"
     assert settings.sentinel_lineage_hop_limit == 3
 
 
