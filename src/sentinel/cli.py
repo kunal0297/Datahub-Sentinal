@@ -210,6 +210,50 @@ def enrich(
     asyncio.run(_run())
 
 
+@app.command("ml-check")
+def ml_check(
+    urn: Annotated[
+        str,
+        typer.Option(
+            help="Asset to check: a dataset URN ('what production models depend on "
+            "this?') or an mlModel URN ('what does this model depend on?')."
+        ),
+    ],
+    hop_limit: Annotated[
+        int,
+        typer.Option(help="Lineage hop limit — ML chains run deep, so this defaults higher."),
+    ] = 6,
+) -> None:
+    """ML Blast Radius (Tier 2 MVP): trace ML lineage between this asset and
+    production models, check every asset on those paths for active incidents
+    and failing assertions, and raise an incident ON THE MODEL entity (with
+    the exact path) if a production model sits downstream of an unhealthy
+    asset. On-demand check — see README for a cron/Actions scheduling snippet."""
+    from sentinel.agents.ml_blast_radius.checker import run_ml_check
+    from sentinel.core.config import get_settings
+    from sentinel.core.datahub_client import DataHubClient
+    from sentinel.core.incident_engine import IncidentEngine, SeverityRules
+    from sentinel.integrations.notifiers.jira import JiraNotifier
+    from sentinel.integrations.notifiers.slack import SlackNotifier
+    from sentinel.integrations.notifiers.teams import TeamsNotifier
+
+    settings = get_settings()
+    severity_rules = SeverityRules.from_yaml(settings.sentinel_severity_rules_path)
+
+    async def _run() -> None:
+        with DataHubClient(settings) as client:
+            engine = IncidentEngine(
+                client,
+                severity_rules,
+                notifiers=[SlackNotifier(settings), JiraNotifier(), TeamsNotifier()],
+            )
+            async with client.mcp():
+                report = await run_ml_check(client, engine, urn, hop_limit=hop_limit)
+        typer.echo(report.to_markdown())
+
+    asyncio.run(_run())
+
+
 proposals_app = typer.Typer(
     help="Review Sentinel-drafted metadata change proposals. Accepting a "
     "proposal is the ONLY path by which drafted metadata reaches DataHub."

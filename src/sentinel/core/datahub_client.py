@@ -197,6 +197,67 @@ class DataHubClient:
             return []
         return entity["incidents"]["incidents"]
 
+    def get_assertions_with_latest_run(self, dataset_urn: str) -> list[dict[str, Any]]:
+        """Returns one normalized dict per assertion on the dataset:
+        `{urn, type, description, latest_result, native_results}` where
+        `latest_result` is the most recent COMPLETE run's result type
+        (`SUCCESS`/`FAILURE`) or None if the assertion has never run.
+
+        Query shape verified against the DataHub Assertions API tutorial
+        (docs.datahub.com/docs/api/tutorials/assertions):
+        `dataset(urn){ assertions(start, count){ assertions { urn info{...}
+        runEvents(status: COMPLETE, limit: 1){ runEvents { result {...} } } } } }`.
+        Used by the ML Blast Radius checker to spot upstream assets whose
+        freshness/quality checks are currently failing."""
+        query = """
+        query getAssertions($urn: String!) {
+          dataset(urn: $urn) {
+            assertions(start: 0, count: 100) {
+              total
+              assertions {
+                urn
+                info { type description }
+                runEvents(status: COMPLETE, limit: 1) {
+                  total
+                  failed
+                  succeeded
+                  runEvents {
+                    timestampMillis
+                    result { type nativeResults { key value } }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        data = self._graphql(query, {"urn": dataset_urn})
+        entity = data.get("dataset")
+        if not entity or not entity.get("assertions"):
+            return []
+        normalized = []
+        for assertion in entity["assertions"].get("assertions", []):
+            info = assertion.get("info") or {}
+            events = (assertion.get("runEvents") or {}).get("runEvents") or []
+            latest_result: str | None = None
+            native_results: dict[str, str] = {}
+            if events:
+                result = events[0].get("result") or {}
+                latest_result = result.get("type")
+                native_results = {
+                    nr["key"]: nr["value"] for nr in result.get("nativeResults") or []
+                }
+            normalized.append(
+                {
+                    "urn": assertion["urn"],
+                    "type": info.get("type"),
+                    "description": info.get("description"),
+                    "latest_result": latest_result,
+                    "native_results": native_results,
+                }
+            )
+        return normalized
+
     def update_deprecation(
         self, urn: str, deprecated: bool, note: str, replacement_urn: str | None = None
     ) -> bool:

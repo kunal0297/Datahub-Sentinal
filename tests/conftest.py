@@ -31,6 +31,9 @@ class FakeDataHubClient:
     # urn -> list of sample queries (strings or dicts, mirroring the real
     # tool's unverified payload shape — see enricher._normalize_queries)
     queries: dict[str, list[Any]] = field(default_factory=dict)
+    # dataset urn -> normalized assertion dicts, same shape
+    # DataHubClient.get_assertions_with_latest_run returns
+    assertions: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     _next_incident_id: int = 0
 
@@ -86,6 +89,10 @@ class FakeDataHubClient:
             for r in self.incidents.get(resource_urn, [])
             if r["status"]["state"] == IncidentState.ACTIVE.value
         ]
+
+    def get_assertions_with_latest_run(self, dataset_urn: str) -> list[dict[str, Any]]:
+        self._record("get_assertions_with_latest_run", dataset_urn=dataset_urn)
+        return self.assertions.get(dataset_urn, [])
 
     def update_deprecation(
         self, urn: str, deprecated: bool, note: str, replacement_urn: str | None = None
