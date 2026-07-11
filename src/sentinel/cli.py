@@ -170,6 +170,114 @@ def migrate(
     asyncio.run(_run())
 
 
+@app.command()
+def enrich(
+    urn: Annotated[str, typer.Option(help="URN of the asset to draft documentation for.")],
+) -> None:
+    """Metadata Enrichment (Tier 2 MVP): draft a description + column
+    descriptions grounded strictly in DataHub context (lineage neighbors,
+    sample queries, existing column docs) and submit them as PENDING
+    proposals. Nothing reaches DataHub until `sentinel proposals accept`."""
+    from sentinel.agents.metadata_enrichment.enricher import run_enrichment
+    from sentinel.core.config import get_settings
+    from sentinel.core.datahub_client import DataHubClient
+    from sentinel.core.proposal_engine import ProposalEngine
+
+    settings = get_settings()
+    proposal_engine = ProposalEngine(Path(settings.sentinel_proposals_path))
+
+    async def _run() -> None:
+        with DataHubClient(settings) as client:
+            async with client.mcp():
+                result = await run_enrichment(client, proposal_engine, settings, urn)
+
+        if result.refused:
+            typer.echo(f"Refused to draft for {urn}:\n  {result.reason}")
+            raise typer.Exit(0)
+
+        typer.echo(f"Drafted from evidence: {result.reason}\n")
+        typer.echo(f"{len(result.proposals)} proposal(s) submitted as PENDING:")
+        for p in result.proposals:
+            target = f"{p.change_type}" + (f" ({p.field_path})" if p.field_path else "")
+            typer.echo(f"  [{p.id}] {target}: {p.proposed_value[:80]}")
+        for col in result.insufficient_columns:
+            typer.echo(f"  (no draft) {col.column}: {col.reason}")
+        typer.echo(
+            f"\nReview with `sentinel proposals list`, then accept/reject by id. "
+            f"Store: {settings.sentinel_proposals_path}"
+        )
+
+    asyncio.run(_run())
+
+
+proposals_app = typer.Typer(
+    help="Review Sentinel-drafted metadata change proposals. Accepting a "
+    "proposal is the ONLY path by which drafted metadata reaches DataHub."
+)
+app.add_typer(proposals_app, name="proposals")
+
+
+def _load_proposal_engine():
+    from sentinel.core.config import get_settings
+    from sentinel.core.proposal_engine import ProposalEngine
+
+    settings = get_settings()
+    return ProposalEngine(Path(settings.sentinel_proposals_path)), settings
+
+
+@proposals_app.command("list")
+def proposals_list(
+    target_urn: Annotated[
+        str, typer.Option("--urn", help="Only show proposals targeting this URN.")
+    ] = "",
+) -> None:
+    """List PENDING proposals awaiting human review."""
+    engine, _ = _load_proposal_engine()
+    pending = engine.list_pending(target_urn or None)
+    if not pending:
+        typer.echo("No pending proposals.")
+        return
+    for p in pending:
+        field_part = f" field={p.field_path}" if p.field_path else ""
+        typer.echo(f"[{p.id}] {p.change_type}{field_part} on {p.target_urn}")
+        typer.echo(f"    proposed: {p.proposed_value}")
+        typer.echo(f"    rationale: {p.rationale}")
+
+
+@proposals_app.command("accept")
+def proposals_accept(
+    proposal_id: Annotated[str, typer.Argument(help="Proposal id from `sentinel proposals list`.")],
+    decided_by: Annotated[
+        str, typer.Option(help="Who is accepting (for the audit trail).")
+    ] = "cli",
+) -> None:
+    """Accept a proposal — this performs the real DataHub write."""
+    from sentinel.core.datahub_client import DataHubClient
+
+    engine, settings = _load_proposal_engine()
+
+    async def _run() -> None:
+        with DataHubClient(settings) as client:
+            async with client.mcp():
+                proposal = await engine.accept(proposal_id, client, decided_by=decided_by)
+        typer.echo(f"Accepted {proposal.id}: wrote {proposal.change_type} to {proposal.target_urn}")
+
+    asyncio.run(_run())
+
+
+@proposals_app.command("reject")
+def proposals_reject(
+    proposal_id: Annotated[str, typer.Argument(help="Proposal id from `sentinel proposals list`.")],
+    decided_by: Annotated[
+        str, typer.Option(help="Who is rejecting (for the audit trail).")
+    ] = "cli",
+) -> None:
+    """Reject a proposal — nothing is written to DataHub."""
+    engine, _ = _load_proposal_engine()
+    proposal = engine.reject(proposal_id, decided_by=decided_by)
+    typer.echo(f"Rejected {proposal.id} — no DataHub write performed.")
+
+
 @migrate_app.command("status")
 def migrate_status(
     from_urn: Annotated[

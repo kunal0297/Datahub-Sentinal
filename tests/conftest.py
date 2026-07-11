@@ -28,6 +28,9 @@ class FakeDataHubClient:
     # urn -> {"DOWNSTREAM": [...], "UPSTREAM": [...]}
     lineage: dict[str, dict[str, list[str]]] = field(default_factory=dict)
     schema_fields: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    # urn -> list of sample queries (strings or dicts, mirroring the real
+    # tool's unverified payload shape — see enricher._normalize_queries)
+    queries: dict[str, list[Any]] = field(default_factory=dict)
     calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     _next_incident_id: int = 0
 
@@ -121,6 +124,10 @@ class FakeDataHubClient:
     async def search(self, query: str, num_results: int = 10, **filters: Any):
         self._record("search", query=query, num_results=num_results)
         return []
+
+    async def get_dataset_queries(self, urn: str, **kwargs: Any):
+        self._record("get_dataset_queries", urn=urn)
+        return self.queries.get(urn, [])
 
     async def get_lineage_paths_between(self, source_urn: str, target_urn: str):
         self._record("get_lineage_paths_between", source_urn=source_urn, target_urn=target_urn)

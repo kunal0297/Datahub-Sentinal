@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     # Behavior
     sentinel_severity_rules_path: str = "config/severity_rules.yml"
     sentinel_quality_checks_path: str = "quality_checks.yml"
+    # Where core/proposal_engine.py persists its pending/accepted/rejected
+    # proposal store (a plain JSON file — inspectable and diffable by design).
+    sentinel_proposals_path: str = "proposals.json"
     sentinel_lineage_hop_limit: int = 3
     # Off by default: a hackathon demo of a tool that blocks merges by
     # default reads as hostile, not helpful (per spec Section 5.1 step 7).

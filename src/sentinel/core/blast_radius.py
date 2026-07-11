@@ -16,7 +16,7 @@ dicts each containing at least `urn`, `type`, `name`, `owners`, `tags`,
 truth for that contract in tests. Reconcile this against the real tool's
 actual response during the deferred live-DataHub verification pass (see
 ARCHITECTURE.md "Status notes") — if the real shape differs, adapt the two
-`_fetch_assets`/`walk_lineage` call sites, not the rest of this module.
+`fetch_assets`/`walk_lineage` call sites, not the rest of this module.
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ def _asset_from_entity(urn: str, entity: dict[str, Any]) -> Asset:
     )
 
 
-async def _fetch_assets(client: LineageBackend, urns: list[str]) -> dict[str, Asset]:
+async def fetch_assets(client: LineageBackend, urns: list[str]) -> dict[str, Asset]:
     """Looks up each urn's Asset projection, one `get_entities` batch call
     for all of them. An urn DataHub doesn't return anything for still gets a
     minimal placeholder Asset (entity type parsed from the URN itself) rather
@@ -163,7 +163,7 @@ async def compute_blast_radius(
     edges = await walk_lineage(client, urn, direction, hop_limit)
     impacted_urns = sorted({e.target_urn for e in edges} - {urn})
 
-    assets = await _fetch_assets(client, [urn, *impacted_urns])
+    assets = await fetch_assets(client, [urn, *impacted_urns])
     source_asset = assets[urn]
 
     return BlastRadiusReport(
